@@ -436,9 +436,51 @@ static const struct ssd1306_config ssd1306_config = {
 	.reset = GPIO_DT_SPEC_INST_GET_OR(0, reset_gpios, { 0 })
 };
 
+static int ext_power_status = true;
+
+static int ssd1306_update_ext_power(const struct device *dev, bool ext_power_status_new_value) {
+	const struct ssd1306_config *config = dev->config;
+
+	// minimum sleep needed when waking up
+	if (ext_power_status_new_value == true) {
+		k_sleep(K_MSEC(30));
+	}
+
+	// first update to I2C
+	if (dev->data != NULL) {
+		if (config->bus.bus != NULL) {
+			if(i2c_update_ext_power(config->bus.bus, ext_power_status_new_value)) {
+				LOG_ERR("Failed i2c_update_ext_power!");
+				return -EIO;
+			}
+		} else {
+			LOG_ERR("I2C bus is NULL");
+		}
+	} else {
+		LOG_ERR("display data is NULL");
+	}
+
+	if (ext_power_status != ext_power_status_new_value) {
+		if (ext_power_status_new_value == true)
+		{
+			// sleep after I2C reset
+			k_sleep(K_MSEC(30));
+
+			// re-init oled, sends commands through i2c bus
+			ssd1306_init(dev);
+		} else {
+			// no-op for now
+		}
+
+		ext_power_status = ext_power_status_new_value;
+	}
+	return 0;
+}
+
 static struct ssd1306_data ssd1306_driver;
 
 static struct display_driver_api ssd1306_driver_api = {
+	.update_ext_power = ssd1306_update_ext_power,
 	.blanking_on = ssd1306_suspend,
 	.blanking_off = ssd1306_resume,
 	.write = ssd1306_write,
@@ -451,7 +493,9 @@ static struct display_driver_api ssd1306_driver_api = {
 	.set_orientation = ssd1306_set_orientation,
 };
 
+#define DISPLAY_INIT_PRIORITY 95
+
 DEVICE_DT_INST_DEFINE(0, ssd1306_init, NULL,
 		      &ssd1306_driver, &ssd1306_config,
-		      POST_KERNEL, CONFIG_DISPLAY_INIT_PRIORITY,
+		      POST_KERNEL, DISPLAY_INIT_PRIORITY,
 		      &ssd1306_driver_api);
